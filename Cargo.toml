@@ -1,0 +1,26 @@
+[workspace]
+
+[package]
+name = "video-compare-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "Video comparison tool with instant tab switching, GStreamer playback engine, and Slint UI."
+
+[dependencies]
+slint = "1"
+# The real playback engine is reused almost verbatim from the main app.
+gstreamer = "0.23"
+gstreamer-app = "0.23"
+gstreamer-video = "0.23"
+# Static media facts (codecs, dimensions, sample rate, channels, nominal bitrate)
+# for the VLC-style info bar — gathered once per file via the Discoverer.
+gstreamer-pbutils = "0.23"
+# We upload video frames into GL textures in Slint's own renderer context (via
+# the rendering notifier) and hand the texture ids to Slint to composite.
+glow = "0.13"
+# euclid 0.22 is what i-slint-core uses for `IntSize`; pin it so the type unifies.
+euclid = "0.22"
+rfd = "0.17"
+
+[build-dependencies]
+slint-build = "1"

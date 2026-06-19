@@ -1,0 +1,1372 @@
+// Video Compare Desktop — UI layout.
+//
+// The video frame is drawn as an Image filling the window; controls float on
+// top as translucent rounded cards. Transport and tab actions are callbacks
+// wired to the GStreamer engine in main.rs.
+
+export struct TabData {
+    label: string,
+    active: bool,
+    starred: bool,
+    path: string,
+    info: string,
+    video-codec: string,
+    filesize: string,
+}
+
+// ----- A mirrorable key glyph (ring + shaft + teeth) -------------------------
+component KeyIcon inherits Rectangle {
+    in property <bool> point-left: false;
+    in property <color> ink: #e2e8f0;
+    width: 24px;
+    height: 16px;
+    Rectangle {
+        x: root.point-left ? 14px : 0px;
+        y: (parent.height - self.height) / 2;
+        width: 11px;
+        height: 11px;
+        border-radius: 5.5px;
+        border-width: 2px;
+        border-color: root.ink;
+        background: transparent;
+    }
+    Rectangle {
+        x: root.point-left ? 4px : 9px;
+        y: (parent.height - self.height) / 2;
+        width: 11px;
+        height: 3px;
+        border-radius: 1.5px;
+        background: root.ink;
+    }
+    Rectangle {
+        x: root.point-left ? 6px : 16px;
+        y: parent.height / 2;
+        width: 3px;
+        height: 6px;
+        border-radius: 1px;
+        background: root.ink;
+    }
+    Rectangle {
+        x: root.point-left ? 2px : 20px;
+        y: parent.height / 2;
+        width: 3px;
+        height: 4px;
+        border-radius: 1px;
+        background: root.ink;
+    }
+}
+
+component GhostButton inherits Rectangle {
+    callback clicked();
+    in property <bool> enabled: true;
+    width: 40px;
+    height: 40px;
+    border-radius: 20px;
+    background: ta.has-hover && root.enabled ? #ffffff1f : transparent;
+    animate background { duration: 100ms; }
+    opacity: root.enabled ? 1.0 : 0.35;
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+    VerticalLayout {
+        alignment: center;
+        HorizontalLayout {
+            alignment: center;
+            @children
+        }
+    }
+}
+
+component PlayPauseButton inherits Rectangle {
+    in property <bool> playing: true;
+    in property <bool> enabled: true;
+    callback clicked();
+    width: 50px;
+    height: 50px;
+    border-radius: 25px;
+    background: (ta.pressed && root.enabled) ? #2563eb : ((ta.has-hover && root.enabled) ? #60a5fa : #3b82f6);
+    animate background { duration: 120ms; }
+    drop-shadow-blur: 18px;
+    drop-shadow-color: #2563eb66;
+    drop-shadow-offset-y: 4px;
+    opacity: root.enabled ? 1.0 : 0.4;
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+    if !root.playing : Path {
+        width: 22px;
+        height: 22px;
+        x: (parent.width - self.width) / 2 + 2px;
+        y: (parent.height - self.height) / 2;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: "M 6 4 L 20 12 L 6 20 Z";
+        fill: white;
+    }
+    if root.playing : HorizontalLayout {
+        width: 20px;
+        height: 22px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        spacing: 6px;
+        Rectangle { width: 7px; border-radius: 3px; background: white; }
+        Rectangle { width: 7px; border-radius: 3px; background: white; }
+    }
+}
+
+component SeekBar inherits Rectangle {
+    in property <float> progress: 0.0;
+    in property <bool> enabled: true;
+    callback seek(float);
+    height: 18px;
+    horizontal-stretch: 1;
+    opacity: root.enabled ? 1.0 : 0.35;
+    Rectangle {
+        y: (parent.height - self.height) / 2;
+        height: 5px;
+        width: 100%;
+        border-radius: 2.5px;
+        background: #ffffff2e;
+        Rectangle {
+            x: 0;
+            y: 0;
+            height: 100%;
+            width: parent.width * root.progress;
+            border-radius: 2.5px;
+            background: #3b82f6;
+        }
+    }
+    Rectangle {
+        width: ta.has-hover ? 19px : 16px;
+        height: self.width;
+        border-radius: self.width / 2;
+        background: white;
+        x: clamp(root.width * root.progress - self.width / 2, 0px, root.width - self.width);
+        y: (parent.height - self.height) / 2;
+        drop-shadow-blur: 6px;
+        drop-shadow-color: #00000099;
+        animate width { duration: 80ms; }
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.seek(clamp(self.mouse-x / root.width, 0.0, 1.0)); }
+        moved => {
+            if (self.pressed) {
+                root.seek(clamp(self.mouse-x / root.width, 0.0, 1.0));
+            }
+        }
+    }
+}
+
+component Chip inherits Rectangle {
+    in property <string> text;
+    in property <bool> accent: false;
+    height: 26px;
+    width: min(label.preferred-width + 24px, 260px);
+    border-radius: 13px;
+    background: root.accent ? #1e3a8a : #ffffff14;
+    label := Text {
+        text: root.text;
+        color: root.accent ? #93c5fd : #cbd5e1;
+        font-size: 11px;
+        x: 12px;
+        width: parent.width - 24px;
+        height: 100%;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+// One labelled fact in the info bar: a small muted caption above the value,
+// VLC-style. Pass chip="" (default) for plain text; pass a codec name and it
+// renders a small blue pill before the meta string.
+component InfoField inherits VerticalLayout {
+    in property <string> label;
+    in property <string> value;
+    in property <string> chip: "";
+    alignment: center;
+    spacing: 4px;
+    Text {
+        text: root.label;
+        color: #64748b;
+        font-size: 10px;
+        letter-spacing: 0.8px;
+    }
+    HorizontalLayout {
+        spacing: 6px;
+        alignment: start;
+        if root.chip != "" : Rectangle {
+            height: 18px;
+            width: chip-lbl.preferred-width + 14px;
+            border-radius: 9px;
+            background: #1e3a8a;
+            chip-lbl := Text {
+                text: root.chip;
+                color: #93c5fd;
+                font-size: 10px;
+                x: 7px;
+                height: 100%;
+                vertical-alignment: center;
+            }
+        }
+        Text {
+            text: root.value;
+            color: #e2e8f0;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// Purely visual tab pill — no input of its own. The owning TabStrip drives its
+// geometry (width/x) and feeds in the hover/close-hot/dragging flags, so the same
+// pill is reused both for the in-strip tabs and for the floating drag ghost.
+component TabPill inherits Rectangle {
+    in property <string> label;
+    in property <bool> active: false;
+    in property <bool> starred: false;
+    in property <bool> hovered: false;
+    in property <bool> close-hot: false;
+    in property <bool> dragging: false;
+    in property <int> tab-idx: -1;  // 0-based; badge shown for 0-8
+    height: 30px;
+    border-radius: 15px;
+    background: root.active ? #1d4ed8 : (root.hovered ? #ffffff24 : #ffffff12);
+    animate background { duration: 120ms; }
+    // The drag ghost lifts off the strip with a shadow.
+    drop-shadow-blur: root.dragging ? 16px : 0px;
+    drop-shadow-color: #00000088;
+    drop-shadow-offset-y: root.dragging ? 5px : 0px;
+
+    property <bool> has-badge: root.tab-idx >= 0 && root.tab-idx < 20;
+    property <string> badge-key:
+        root.tab-idx == 0 ? "1" : root.tab-idx == 1 ? "2" : root.tab-idx == 2 ? "3" :
+        root.tab-idx == 3 ? "4" : root.tab-idx == 4 ? "5" : root.tab-idx == 5 ? "6" :
+        root.tab-idx == 6 ? "7" : root.tab-idx == 7 ? "8" : root.tab-idx == 8 ? "9" :
+        root.tab-idx == 9 ? "0" : root.tab-idx == 10 ? "q" : root.tab-idx == 11 ? "w" :
+        root.tab-idx == 12 ? "e" : root.tab-idx == 13 ? "r" : root.tab-idx == 14 ? "t" :
+        root.tab-idx == 15 ? "y" : root.tab-idx == 16 ? "u" : root.tab-idx == 17 ? "i" :
+        root.tab-idx == 18 ? "o" : root.tab-idx == 19 ? "p" : "";
+    property <length> star-w: root.starred ? 20px : 0px;
+    property <length> badge-w: root.has-badge ? 16px : 0px;
+    property <length> label-x: 10px + root.star-w + root.badge-w + (root.has-badge ? 4px : 0px);
+
+    // Gold star on the left edge when the tab is starred.
+    if root.starred : Text {
+        text: "★";
+        color: #fbbf24;
+        font-size: 14px;
+        x: 10px;
+        height: 100%;
+        vertical-alignment: center;
+    }
+    // Small shortcut key badge (tabs 1–9).
+    if root.has-badge : Rectangle {
+        x: 10px + root.star-w;
+        y: (parent.height - self.height) / 2;
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        background: root.active ? #ffffff38 : #ffffff26;
+        Text {
+            text: root.badge-key;
+            color: root.active ? #ffffff : #cbd5e1;
+            font-size: 9px;
+            width: 100%;
+            height: 100%;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    Text {
+        text: root.label;
+        color: white;
+        font-size: 13px;
+        x: root.label-x;
+        width: root.width - root.label-x - 26px;
+        height: 100%;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    // Close glyph: shown on the active or hovered tab, highlighted over the close zone.
+    if (root.active || root.hovered) : Rectangle {
+        width: 20px;
+        height: 20px;
+        border-radius: 10px;
+        x: parent.width - self.width - 7px;
+        y: (parent.height - self.height) / 2;
+        background: root.close-hot ? #ffffff40 : transparent;
+        Text {
+            text: "✕";
+            color: white;
+            font-size: 11px;
+            width: 100%;
+            height: 100%;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// A left/right scroll chevron that surfaces only when the strip overflows. Painted
+// in the primary blue so it reads clearly against the dark bar.
+component ArrowButton inherits Rectangle {
+    in property <bool> point-left: false;
+    callback clicked();
+    width: 26px;
+    height: self.width;
+    border-radius: self.width / 2;
+    background: ta.pressed ? #2563eb : (ta.has-hover ? #60a5fa : #3b82f6);
+    animate background { duration: 100ms; }
+    drop-shadow-blur: 8px;
+    drop-shadow-color: #2563eb55;
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+    Path {
+        width: 9px;
+        height: 12px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: root.point-left ? "M 16 4 L 6 12 L 16 20 Z" : "M 8 4 L 18 12 L 8 20 Z";
+        fill: white;
+    }
+}
+
+component PlusButton inherits Rectangle {
+    callback clicked();
+    width: 30px;
+    height: 30px;
+    border-radius: 15px;
+    background: ta.has-hover ? #ffffff26 : #ffffff12;
+    animate background { duration: 120ms; }
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+    Text {
+        text: "+";
+        color: white;
+        font-size: 20px;
+        width: 100%;
+        height: 100%;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+// Loop toggle: a repeat glyph that lights up blue when looping is on and dims to
+// grey when off. Sits just left of the time counter; click it (or press L /
+// Ctrl+L) to toggle. Owns no state — the window holds `loop-enabled` and feeds it
+// back in so the colour always reflects the engine.
+component LoopButton inherits Rectangle {
+    in property <bool> active: true;
+    in property <bool> enabled: true;
+    callback clicked();
+    width: 30px;
+    height: 30px;
+    border-radius: 15px;
+    background: ta.has-hover && root.enabled ? #ffffff1f : transparent;
+    animate background { duration: 100ms; }
+    opacity: root.enabled ? 1.0 : 0.4;
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    // Material "repeat" glyph: two arrows chasing each other round a loop.
+    Path {
+        width: 17px;
+        height: 17px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: "M 7 7 L 17 7 L 17 10 L 21 6 L 17 2 L 17 5 L 5 5 L 5 11 L 7 11 Z M 17 17 L 7 17 L 7 14 L 3 18 L 7 22 L 7 19 L 19 19 L 19 13 L 17 13 Z";
+        fill: root.active ? #3b82f6 : #64748b;
+        animate fill { duration: 120ms; }
+    }
+}
+
+// The whole tab strip: equal-width "flex" tabs that fill the available area and
+// fall back to a fixed min width + horizontal scroll when they'd overflow. The "+"
+// button is parked sticky at the right edge while tabs exist (and jumps left when
+// the strip is empty). Supports wheel scrolling, chevron paging, and Chrome-style
+// drag-to-reorder.
+component TabStrip inherits Rectangle {
+    in property <[TabData]> tabs;
+    in property <float> ui-scale: 1.0;
+    callback select(int);
+    callback close(int);
+    callback reorder(int, int);
+    callback toggle-star(int);
+    callback add-tab();
+
+    height: 30px;
+
+    property <int> count: root.tabs.length;
+    property <length> min-tw: 200px / root.ui-scale;  // tabs flex equally; below this they overflow
+    property <length> arrow-w: 26px;
+    property <length> plus-w: 30px;
+    property <length> gap: 8px;
+
+    // The "+" is always parked at the right (a fixed reservation the tabs flex
+    // around), so the tabs never push it off; when there are no tabs at all it
+    // moves to the left instead.
+    property <length> plus-reserve: root.count > 0 ? root.plus-w + root.gap : 0px;
+    property <length> avail: max(0px, root.width - root.plus-reserve);
+    // Tabs flex to fill the available width; once each would fall below min-tw we
+    // pin them to min-tw and let the row overflow (scrollable). The chevrons then
+    // claim a gutter on the left and one just left of the sticky "+".
+    out property <bool> overflowing: root.count > 0 && (root.avail / root.count) < root.min-tw;
+    property <length> reserved-left: root.overflowing ? root.arrow-w + root.gap : 0px;
+    property <length> reserved-right: root.overflowing ? root.arrow-w + root.gap : 0px;
+    property <length> vp-x: root.reserved-left;
+    out property <length> vp-w: max(0px, root.width - root.plus-reserve - root.reserved-left - root.reserved-right);
+    out property <length> tab-w: root.overflowing ? root.min-tw : (root.count > 0 ? root.vp-w / root.count : root.vp-w);
+    property <length> content-w: root.tab-w * root.count;
+    out property <length> max-scroll: max(0px, root.content-w - root.vp-w);
+    in-out property <length> scroll-x: 0px;
+    property <length> eff-scroll: clamp(root.scroll-x, 0px, root.max-scroll);
+    // Sticky at the right edge whenever tabs exist; parked left when the strip is empty.
+    property <length> plus-x: root.count > 0 ? (root.width - root.plus-w) : 0px;
+
+    // Drag state. drag-index is the tab being dragged (-1 = none); drag-delta is
+    // how far its ghost has moved from where it was grabbed; drag-target is the
+    // slot it would drop into right now.
+    property <bool> dragging: false;
+    property <int> drag-index: -1;
+    property <length> drag-delta: 0px;
+    property <length> drag-base: root.drag-index >= 0 ? root.drag-index * root.tab-w : 0px;
+    property <int> drag-target: clamp(round((root.drag-base + root.drag-delta) / root.tab-w), 0, max(0, root.count - 1));
+
+    // Which tab the pointer is currently hovering (-1 = none), and its center x
+    // within this component's coordinate system. Used to position the tooltip.
+    out property <int> hovered-tab-idx: -1;
+    out property <length> hovered-center-x: 0px;
+    out property <bool> tooltip-armed: false;
+
+
+    // Background reset: clears hover state when pointer moves over empty strip area.
+    bg-ta := TouchArea {
+        x: 0; y: 0; width: parent.width; height: parent.height;
+        pointer-event(ev) => {
+            if (ev.kind == PointerEventKind.move) {
+                root.hovered-tab-idx = -1;
+                root.tooltip-armed = false;
+                tooltip-timer.running = false;
+            }
+        }
+    }
+
+    // Clipped viewport holding the tabs and the drag ghost.
+    Rectangle {
+        x: root.vp-x;
+        width: root.vp-w;
+        height: 100%;
+        clip: true;
+
+        for tab[idx] in root.tabs : Rectangle {
+            // Rank of this tab once the dragged one is lifted out of the order…
+            property <int> rank: idx < root.drag-index ? idx : idx - 1;
+            // …then re-inserted, opening a gap at drag-target.
+            property <int> reflowed: rank < root.drag-target ? rank : rank + 1;
+            // The dragged tab keeps its anchor (so the grab stays stable); others
+            // slide to their reflowed slot with an ease-in-out push.
+            property <length> slot-x: (root.dragging && idx == root.drag-index)
+                ? root.drag-base
+                : (root.dragging ? reflowed * root.tab-w : idx * root.tab-w);
+            animate slot-x { duration: 160ms; easing: ease-in-out; }
+
+            x: self.slot-x - root.eff-scroll;
+            y: 0;
+            width: root.tab-w;
+            height: 100%;
+            // The dragged tab is drawn by the floating ghost instead.
+            opacity: (root.dragging && idx == root.drag-index) ? 0 : 1;
+
+            ta := TouchArea {
+                mouse-cursor: root.dragging ? MouseCursor.grabbing : MouseCursor.pointer;
+                changed has-hover => {
+                    if (!self.has-hover && root.hovered-tab-idx == idx) {
+                        root.hovered-tab-idx = -1;
+                        root.tooltip-armed = false;
+                        tooltip-timer.running = false;
+                    }
+                }
+                moved => {
+                    if (self.pressed) {
+                        if (!root.dragging && abs(self.mouse-x - self.pressed-x) > 6px) {
+                            root.dragging = true;
+                            root.drag-index = idx;
+                        }
+                        if (root.dragging && root.drag-index == idx) {
+                            root.drag-delta = self.mouse-x - self.pressed-x;
+                        }
+                    }
+                }
+                pointer-event(ev) => {
+                    if (ev.kind == PointerEventKind.move) {
+                        if (root.hovered-tab-idx != idx) {
+                            root.tooltip-armed = false;
+                            tooltip-timer.running = false;
+                            tooltip-timer.running = true;
+                        }
+                        root.hovered-tab-idx = idx;
+                        root.hovered-center-x = root.vp-x + idx * root.tab-w + root.tab-w / 2 - root.eff-scroll;
+                    }
+                    if (ev.kind == PointerEventKind.up) {
+                        if (ev.button == PointerEventButton.middle) {
+                            // Middle-click (scroll-wheel press) closes the tab,
+                            // browser-style.
+                            root.close(idx);
+                        } else if (root.dragging && root.drag-index == idx) {
+                            root.reorder(idx, root.drag-target);
+                        } else if (abs(self.mouse-x - self.pressed-x) <= 6px) {
+                            if (self.mouse-x > self.width - 30px) {
+                                root.close(idx);
+                            } else {
+                                root.select(idx);
+                            }
+                        }
+                        root.dragging = false;
+                        root.drag-index = -1;
+                        root.drag-delta = 0px;
+                    }
+                }
+                scroll-event(ev) => {
+                    root.scroll-x = clamp(root.eff-scroll - ev.delta-y - ev.delta-x, 0px, root.max-scroll);
+                    return accept;
+                }
+            }
+
+            TabPill {
+                width: 100%;
+                height: 100%;
+                label: tab.label;
+                active: tab.active;
+                starred: tab.starred;
+                hovered: ta.has-hover && !root.dragging;
+                close-hot: ta.has-hover && ta.mouse-x > parent.width - 30px;
+                tab-idx: idx;
+            }
+        }
+
+        // Floating ghost of the tab under the pointer while dragging.
+        if root.dragging && root.drag-index >= 0 : TabPill {
+            width: root.tab-w;
+            height: 100%;
+            x: root.drag-base + root.drag-delta - root.eff-scroll;
+            label: root.tabs[root.drag-index].label;
+            active: root.tabs[root.drag-index].active;
+            starred: root.tabs[root.drag-index].starred;
+            hovered: true;
+            dragging: true;
+            tab-idx: root.drag-index;
+        }
+    }
+
+    // Chevrons: present only while overflowing, each shown only when it can scroll
+    // that way. They page two tabs at a time. The left one sits in the left gutter;
+    // the right one sits just left of the sticky "+".
+    if root.overflowing && root.eff-scroll > 0px : ArrowButton {
+        point-left: true;
+        x: 0;
+        y: (parent.height - self.height) / 2;
+        clicked => {
+            root.scroll-x = clamp(root.eff-scroll - 2 * root.tab-w, 0px, root.max-scroll);
+        }
+    }
+    if root.overflowing && root.eff-scroll < root.max-scroll : ArrowButton {
+        point-left: false;
+        x: root.plus-x - root.gap - self.width;
+        y: (parent.height - self.height) / 2;
+        clicked => {
+            root.scroll-x = clamp(root.eff-scroll + 2 * root.tab-w, 0px, root.max-scroll);
+        }
+    }
+
+    tooltip-timer := Timer {
+        interval: 400ms;
+        running: false;
+        triggered => {
+            root.tooltip-armed = true;
+            self.running = false;
+        }
+    }
+
+    // The "+" button: trails the last tab, or sticks to the right edge on overflow.
+    PlusButton {
+        x: root.plus-x;
+        y: (parent.height - self.height) / 2;
+        clicked => { root.add-tab(); }
+    }
+}
+
+// Zoom level dropdown for the top bar. Shows the current zoom as a percentage and
+// drops a list of fixed steps (25%–400% in 25% increments) on click. Purely a
+// chooser — it owns no zoom state; the window holds the shared `zoom` and feeds it
+// back in, so the button label and the active-row highlight always reflect it.
+component ZoomSelector inherits Rectangle {
+    in property <float> zoom: 1.0;
+    callback changed(float);
+
+    // 0.25 → 4.0 in 0.25 steps. Every value is an exact binary float (a multiple
+    // of 1/4), so the `lvl == root.zoom` highlight test below is reliable.
+    property <[float]> levels: [
+        0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0,
+        2.25, 2.5, 2.75, 3.0, 3.25, 3.5, 3.75, 4.0,
+    ];
+
+    width: 70px;
+    height: 26px;
+    border-radius: 13px;
+    background: ta.has-hover ? #ffffff24 : #ffffff14;
+    animate background { duration: 120ms; }
+
+    ta := TouchArea {
+        clicked => { popup.show(); }
+    }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 11px;
+        spacing: 6px;
+        Text {
+            text: "\{round(root.zoom * 100)}%";
+            color: #e2e8f0;
+            font-size: 12px;
+            vertical-alignment: center;
+            horizontal-alignment: right;
+        }
+        Text {
+            text: "▾";
+            color: #94a3b8;
+            font-size: 9px;
+            vertical-alignment: center;
+        }
+    }
+
+    popup := PopupWindow {
+        x: 0;
+        y: root.height + 6px;
+        width: root.width;
+        // Outside clicks dismiss it; a row click is handled by us and then closes
+        // the popup explicitly (close-on-click would swallow the row's `clicked`).
+        close-policy: close-on-click-outside;
+
+        Rectangle {
+            background: #0c1526;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: #1e293b;
+            drop-shadow-blur: 20px;
+            drop-shadow-color: #000000aa;
+            drop-shadow-offset-y: 4px;
+            VerticalLayout {
+                padding: 6px;
+                spacing: 1px;
+                for lvl in root.levels : Rectangle {
+                    height: 26px;
+                    border-radius: 6px;
+                    background: row-ta.has-hover
+                        ? #ffffff1f
+                        : (lvl == root.zoom ? #1e3a8a : transparent);
+                    row-ta := TouchArea {
+                        clicked => {
+                            root.changed(lvl);
+                            popup.close();
+                        }
+                    }
+                    Text {
+                        text: "\{round(lvl * 100)}%";
+                        color: lvl == root.zoom ? #93c5fd : #e2e8f0;
+                        font-size: 12px;
+                        x: 0;
+                        width: parent.width - 12px;
+                        height: 100%;
+                        vertical-alignment: center;
+                        horizontal-alignment: right;
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component MainWindow inherits Window {
+    title: "Video Compare Desktop";
+    preferred-width: 1120px;
+    preferred-height: 660px;
+    background: #000000;
+
+    in property <image> video-frame;
+    in property <bool> playing: true;
+    in property <bool> loop-enabled: true;
+    in property <[TabData]> tabs;
+    in property <int> active-tab: 0;
+    in property <string> filename: "(no file)";
+    in property <string> info-text;
+    in property <string> size-text;
+    in property <string> video-codec;
+    in property <string> audio-codec;
+    in property <float> display-scale: 1.0;
+    // Pan offset applied to the video frame, in window pixels. Shared across all
+    // tabs (it lives on the window, not per-tab) so switching tabs — and opening
+    // new files — keeps the same framing, which is what you want when comparing
+    // the same region across clips. Right-drag pans; right-double-click resets to
+    // 0/0 (centre). Deliberately unclamped: the frame is free to overflow the
+    // edges of the (clipped) video area.
+    property <length> pan-x: 0px;
+    property <length> pan-y: 0px;
+    // Video zoom factor, shared across all tabs and applied to newly opened files
+    // exactly like the pan offset above (it lives on the window, not per-tab).
+    // 1.0 = 100%; driven by the top-bar dropdown and by wheel-scroll over the
+    // video. Set only through `set-zoom`, which clamps and snaps to the 25% grid.
+    property <float> zoom: 1.0;
+    // Transient toaster (bottom-right) confirming a command was performed.
+    property <string> toast-text: "";
+    property <bool> toast-visible: false;
+    // Static codec/stream facts for the toggleable info bar (J / Ctrl+J).
+    property <bool> show-info: false;
+    property <bool> show-top-info: true;
+    // Bottom edge of the tab strip band — tooltip is anchored just below it.
+    property <length> tab-band-bottom: 50px + (root.show-info ? 60px : 0px) + 54px;
+    in property <string> info-container;
+    in property <string> info-video;
+    in property <string> info-audio;
+    in property <string> info-encoder;
+    in property <string> time-text: "0:00 / 0:00";
+    in property <string> frame-text: "#-";
+    property <bool> show-frames: true;
+    in property <float> progress: 0.0;
+
+    callback toggle-play();
+    callback toggle-loop();
+    callback select-tab(int);
+    callback close-tab(int);
+    callback toggle-star(int);
+    callback reorder-tab(int, int);
+    callback reopen-closed();
+    callback open-file();
+    callback step(int);
+    callback keyframe(int);
+    callback seek(float);
+    callback seek-relative(float);
+    callback request-quit();
+
+    // Keyboard shortcuts: space = play/pause, ←/→ = seek ±5s, ,/. = step one frame,
+    // 1-0 then q-p = switch tab, PgUp/PgDown (with or without Ctrl) = prev/next tab,
+    // Ctrl+O = open, Ctrl+I = toggle top info, Ctrl+0 = reset pan, j = toggle media
+    // info, l / Ctrl+L = toggle loop, s = star, Esc = quit.
+    forward-focus: keys;
+    keys := FocusScope {
+        width: 0px;
+        height: 0px;
+        key-pressed(event) => {
+            if (event.modifiers.control && event.modifiers.shift && (event.text == "t" || event.text == "T")) {
+                root.reopen-closed();
+            } else if (event.modifiers.control && (event.text == "w" || event.text == "W")) {
+                root.close-tab(root.active-tab);
+            } else if (event.modifiers.control && (event.text == "o" || event.text == "O")) {
+                root.open-file();
+            } else if (event.modifiers.control && (event.text == "i" || event.text == "I")) {
+                root.show-top-info = !root.show-top-info;
+            } else if (event.modifiers.control && event.text == "0") {
+                root.reset-pan();
+            } else if (event.text == Key.PageUp) {
+                root.activate-tab(root.active-tab - 1);
+            } else if (event.text == Key.PageDown) {
+                root.activate-tab(root.active-tab + 1);
+            } else if (!event.modifiers.control && (event.text == "s" || event.text == "S")) {
+                root.toggle-star(root.active-tab);
+            } else if (event.text == "j" || event.text == "J") {
+                root.show-info = !root.show-info;
+            } else if (event.text == "l" || event.text == "L") {
+                // Plain L and Ctrl+L both toggle looping.
+                root.toggle-loop();
+            } else if (event.text == " ") {
+                root.toggle-play();
+            } else if (event.text == Key.LeftArrow) {
+                root.seek-relative(-5);
+            } else if (event.text == Key.RightArrow) {
+                root.seek-relative(5);
+            } else if (event.text == ",") {
+                root.step(-1);
+            } else if (event.text == ".") {
+                root.step(1);
+            } else if (event.text == Key.Escape) {
+                root.request-quit();
+            } else if (event.text == "1") {
+                root.activate-tab(0);
+            } else if (event.text == "2") {
+                root.activate-tab(1);
+            } else if (event.text == "3") {
+                root.activate-tab(2);
+            } else if (event.text == "4") {
+                root.activate-tab(3);
+            } else if (event.text == "5") {
+                root.activate-tab(4);
+            } else if (event.text == "6") {
+                root.activate-tab(5);
+            } else if (event.text == "7") {
+                root.activate-tab(6);
+            } else if (event.text == "8") {
+                root.activate-tab(7);
+            } else if (event.text == "9") {
+                root.activate-tab(8);
+            } else if (event.text == "0") {
+                root.activate-tab(9);
+            } else if (!event.modifiers.control && (event.text == "q" || event.text == "Q")) {
+                root.activate-tab(10);
+            } else if (!event.modifiers.control && (event.text == "w" || event.text == "W")) {
+                root.activate-tab(11);
+            } else if (event.text == "e" || event.text == "E") {
+                root.activate-tab(12);
+            } else if (event.text == "r" || event.text == "R") {
+                root.activate-tab(13);
+            } else if (event.text == "t" || event.text == "T") {
+                root.activate-tab(14);
+            } else if (event.text == "y" || event.text == "Y") {
+                root.activate-tab(15);
+            } else if (event.text == "u" || event.text == "U") {
+                root.activate-tab(16);
+            } else if (!event.modifiers.control && (event.text == "i" || event.text == "I")) {
+                root.activate-tab(17);
+            } else if (event.text == "o" || event.text == "O") {
+                root.activate-tab(18);
+            } else if (event.text == "p" || event.text == "P") {
+                root.activate-tab(19);
+            } else {
+                return EventResult.reject;
+            }
+            return EventResult.accept;
+        }
+    }
+
+    // Re-grab keyboard focus (called from Rust after the file dialog, and from
+    // click handlers) so the shortcuts keep working after any interaction.
+    public function refocus() {
+        keys.focus();
+    }
+
+    // Flash the bottom-right toaster with a short confirmation, then let it fade.
+    function show-toast(msg: string) {
+        root.toast-text = msg;
+        root.toast-visible = true;
+        toast-timer.running = false;
+        toast-timer.running = true;
+    }
+
+    // Recentre the (shared) pan and confirm with a toast. Wired to right
+    // double-click and Ctrl+0.
+    function reset-pan() {
+        root.pan-x = 0px;
+        root.pan-y = 0px;
+        root.show-toast("Pan reset");
+    }
+
+    // Clamp to 25%–400% and snap to the nearest 25% step, then flash the level.
+    // The single entry point for every zoom change (dropdown + wheel) so both
+    // stay on the same grid the selector lists.
+    function set-zoom(z: float) {
+        root.zoom = clamp(round(z / 0.25) * 0.25, 0.25, 4.0);
+        root.show-toast("Zoom \{round(root.zoom * 100)}%");
+    }
+
+    // Select a tab by index and scroll it into view (centers it in the viewport).
+    function activate-tab(idx: int) {
+        root.select-tab(idx);
+        if (tab-strip.overflowing) {
+            tab-strip.scroll-x = clamp(
+                idx * tab-strip.tab-w - (tab-strip.vp-w - tab-strip.tab-w) / 2,
+                0px, tab-strip.max-scroll
+            );
+        }
+    }
+
+    // Three stacked regions that never overlap, so input never conflicts: the
+    // tabs/info own the top band, the video lives ONLY in the central area
+    // (clipped to its own container), and the controls own the bottom band.
+    VerticalLayout {
+        spacing: 0;
+
+        // ---- Filename band: filename + optional info chips ------------------
+        Rectangle {
+            height: 50px;
+            background: #0f172a;
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                padding-top: 12px;
+                padding-bottom: 12px;
+                spacing: 12px;
+                Text {
+                    text: root.tabs.length > 0 ? root.filename : "";
+                    color: white;
+                    font-size: 14px;
+                    overflow: elide;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    min-width: 60px;
+                }
+                if root.show-top-info && root.filename != "(no file)" : Chip { text: root.info-text; }
+                if root.show-top-info && root.filename != "(no file)" && root.size-text != "" : Chip { text: root.size-text; }
+                if root.show-top-info && root.filename != "(no file)" && root.video-codec != "" : Chip { text: root.video-codec; accent: true; }
+                // Zoom level chooser — always visible, applies to every tab.
+                VerticalLayout {
+                    alignment: center;
+                    ZoomSelector {
+                        zoom: root.zoom;
+                        changed(z) => { root.set-zoom(z); }
+                    }
+                }
+            }
+        }
+
+        // ---- Info bar (J): VLC-style static media facts, above the tab strip.
+        //      Toggled with J / Ctrl+J. No live values — only facts. ----------
+        if root.show-info : Rectangle {
+            height: 60px;
+            background: #0b1220;
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                background: #1e293b;
+            }
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                spacing: 28px;
+                alignment: start;
+
+                if root.info-container == "" && root.info-video == "" && root.info-audio == "" : InfoField {
+                    label: "MEDIA INFO";
+                    value: "Reading…";
+                }
+                if root.info-container != "" : InfoField {
+                    label: "CONTAINER";
+                    value: root.info-container;
+                }
+                if root.info-video != "" : InfoField {
+                    label: "VIDEO";
+                    value: root.info-video;
+                    chip: root.video-codec;
+                }
+                if root.info-audio != "" : InfoField {
+                    label: "AUDIO";
+                    value: root.info-audio;
+                    chip: root.audio-codec;
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
+        }
+
+        // ---- Tab strip band ------------------------------------------------
+        Rectangle {
+            height: 54px;
+            background: #0f172a;
+            VerticalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                padding-top: 12px;
+                padding-bottom: 12px;
+                tab-strip := TabStrip {
+                    tabs: root.tabs;
+                    ui-scale: root.display-scale;
+                    select(i) => {
+                        root.select-tab(i);
+                        keys.focus();
+                    }
+                    close(i) => {
+                        root.close-tab(i);
+                        keys.focus();
+                    }
+                    reorder(from, to) => {
+                        root.reorder-tab(from, to);
+                        keys.focus();
+                    }
+                    toggle-star(i) => { root.toggle-star(i); }
+                    add-tab => {
+                        root.open-file();
+                        keys.focus();
+                    }
+                }
+            }
+        }
+
+        // ---- Middle: the video main area, confined to and clipped by this
+        //      container so it can never spill over the bars ------------------
+        Rectangle {
+            vertical-stretch: 1;
+            background: black;
+            clip: true;
+            // The frame box scales by `zoom` and is re-centred (the extra size is
+            // split evenly around the middle), so zooming grows the image about
+            // its centre; `pan-x/y` then shifts it. `image-fit: contain` keeps the
+            // video's aspect within the scaled box; the container's clip hides any
+            // overflow past the edges.
+            Image {
+                width: parent.width * root.zoom;
+                height: parent.height * root.zoom;
+                x: root.pan-x + (parent.width - self.width) / 2;
+                y: root.pan-y + (parent.height - self.height) / 2;
+                source: root.video-frame;
+                image-fit: contain;
+            }
+            // Left-drag pans the shared frame; a left click (no drag) toggles play
+            // and left double-click opens a file. Right double-click resets the pan.
+            video-ta := TouchArea {
+                // Anchor for the current left-drag: pointer + pan offset at press.
+                property <length> grab-x;
+                property <length> grab-y;
+                property <length> orig-x;
+                property <length> orig-y;
+                property <bool> panning: false;
+                property <bool> dragged: false;
+                mouse-cursor: self.panning ? MouseCursor.grabbing : MouseCursor.default;
+                clicked => {
+                    // Suppressed after a pan-drag so panning doesn't toggle play.
+                    if (!self.dragged && root.tabs.length > 0) {
+                        root.toggle-play();
+                    }
+                    keys.focus();
+                }
+                double-clicked => {
+                    if (!self.dragged) { root.open-file(); }
+                }
+                // Wheel up zooms in, wheel down zooms out — one 25% step per notch.
+                scroll-event(ev) => {
+                    if (root.tabs.length > 0 && ev.delta-y != 0) {
+                        root.set-zoom(root.zoom + (ev.delta-y > 0 ? 0.25 : -0.25));
+                        return accept;
+                    }
+                    return reject;
+                }
+                pointer-event(ev) => {
+                    // Pan on move while a left-drag is active.
+                    if (ev.kind == PointerEventKind.move && self.panning) {
+                        if (abs(self.mouse-x - self.grab-x) > 2px || abs(self.mouse-y - self.grab-y) > 2px) {
+                            self.dragged = true;
+                        }
+                        root.pan-x = self.orig-x + (self.mouse-x - self.grab-x);
+                        root.pan-y = self.orig-y + (self.mouse-y - self.grab-y);
+                    }
+                    if (ev.button == PointerEventButton.left) {
+                        if (ev.kind == PointerEventKind.down && root.tabs.length > 0) {
+                            self.panning = true;
+                            self.dragged = false;
+                            self.grab-x = self.mouse-x;
+                            self.grab-y = self.mouse-y;
+                            self.orig-x = root.pan-x;
+                            self.orig-y = root.pan-y;
+                        } else if (ev.kind == PointerEventKind.up) {
+                            self.panning = false;
+                        }
+                    }
+                    // Right double-click resets the pan: first right-up arms a short
+                    // timer, a second one while it's still running fires the reset.
+                    if (ev.button == PointerEventButton.right && ev.kind == PointerEventKind.up && root.tabs.length > 0) {
+                        if (reset-timer.running) {
+                            reset-timer.running = false;
+                            root.reset-pan();
+                        } else {
+                            reset-timer.running = true;
+                        }
+                    }
+                    // Middle-click (scroll-wheel press) snaps zoom back to 100%.
+                    if (ev.button == PointerEventButton.middle && ev.kind == PointerEventKind.up && root.tabs.length > 0) {
+                        root.set-zoom(1.0);
+                    }
+                }
+            }
+            reset-timer := Timer {
+                interval: 280ms;
+                running: false;
+                triggered => { self.running = false; }
+            }
+        }
+
+        // ---- Bottom band: transport cluster + counters + seek bar ----------
+        // Every group is vertically centered on one shared line, and each group
+        // centers its own contents.
+        Rectangle {
+            height: 84px;
+            background: #0f172a;
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 22px;
+                spacing: 16px;
+
+                // Transport cluster.
+                HorizontalLayout {
+                    spacing: 8px;
+                    VerticalLayout {
+                        alignment: center;
+                        GhostButton {
+                            enabled: root.tabs.length > 0;
+                            clicked => { root.keyframe(-1); }
+                            KeyIcon { point-left: true; }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        GhostButton {
+                            enabled: root.tabs.length > 0;
+                            clicked => { root.step(-1); }
+                            Path {
+                                width: 15px;
+                                height: 15px;
+                                viewbox-width: 24;
+                                viewbox-height: 24;
+                                commands: "M 17 4 L 5 12 L 17 20 Z";
+                                fill: #e2e8f0;
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        PlayPauseButton {
+                            enabled: root.tabs.length > 0;
+                            playing: root.playing;
+                            clicked => { root.toggle-play(); }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        GhostButton {
+                            enabled: root.tabs.length > 0;
+                            clicked => { root.step(1); }
+                            Path {
+                                width: 15px;
+                                height: 15px;
+                                viewbox-width: 24;
+                                viewbox-height: 24;
+                                commands: "M 7 4 L 19 12 L 7 20 Z";
+                                fill: #e2e8f0;
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        GhostButton {
+                            enabled: root.tabs.length > 0;
+                            clicked => { root.keyframe(1); }
+                            KeyIcon { point-left: false; }
+                        }
+                    }
+                }
+
+                // Counters — loop toggle, then the time + frame numbers. Hugs its
+                // content (no horizontal stretch) so the seek bar keeps the rest.
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 0;
+                    HorizontalLayout {
+                        spacing: 10px;
+                        alignment: center;
+                        VerticalLayout {
+                            alignment: center;
+                            LoopButton {
+                                active: root.loop-enabled;
+                                enabled: root.tabs.length > 0;
+                                clicked => {
+                                    root.toggle-loop();
+                                    keys.focus();
+                                }
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                height: 26px;
+                                border-radius: 4px;
+                                background: time-ta.has-hover ? #ffffff14 : transparent;
+                                animate background { duration: 120ms; }
+                                time-ta := TouchArea {
+                                    clicked => { root.show-frames = !root.show-frames; }
+                                }
+                                Text {
+                                    text: root.time-text;
+                                    color: #e2e8f0;
+                                    font-size: 14px;
+                                    height: 100%;
+                                    vertical-alignment: center;
+                                    padding-left: 6px;
+                                    padding-right: 6px;
+                                }
+                            }
+                        }
+                        if root.show-frames : VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                height: 26px;
+                                border-radius: 4px;
+                                background: frame-ta.has-hover ? #ffffff14 : transparent;
+                                animate background { duration: 120ms; }
+                                frame-ta := TouchArea {
+                                    clicked => { root.show-frames = false; }
+                                }
+                                Text {
+                                    text: root.frame-text;
+                                    color: #94a3b8;
+                                    font-size: 14px;
+                                    height: 100%;
+                                    vertical-alignment: center;
+                                    padding-left: 6px;
+                                    padding-right: 6px;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Seek bar fills the remaining width.
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    SeekBar {
+                        enabled: root.tabs.length > 0;
+                        progress: root.progress;
+                        seek(f) => { root.seek(f); }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- Tab tooltip — floats over the video, rendered on top because it is
+    //      declared after the VerticalLayout. Appears when hovering a tab;
+    //      disappears when the pointer moves to empty strip space or leaves the strip.
+    if tab-strip.hovered-tab-idx >= 0 && tab-strip.hovered-tab-idx < root.tabs.length && tab-strip.tooltip-armed : Rectangle {
+        property <TabData> td: root.tabs[tab-strip.hovered-tab-idx];
+        property <bool> has-meta: td.video-codec != "" || td.info != "" || td.filesize != "";
+
+        // Centre the card on the hovered tab; clamp so it never leaves the window.
+        // Width grows to fit content up to 90% of window width; height is content-driven.
+        x: clamp(16px + tab-strip.hovered-center-x - self.width / 2, 4px, root.width - self.width - 4px);
+        y: root.tab-band-bottom + 6px;
+        width: min(self.preferred-width, root.width * 0.9);
+        height: self.preferred-height;
+
+        background: #0c1526;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: #1e293b;
+        drop-shadow-blur: 20px;
+        drop-shadow-color: #000000aa;
+        drop-shadow-offset-y: 4px;
+
+        VerticalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            padding-top: 10px;
+            padding-bottom: 10px;
+            spacing: 6px;
+
+            // Shortcut key badge + full path
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                if tab-strip.hovered-tab-idx < 20 : Rectangle {
+                    width: 18px;
+                    height: 18px;
+                    border-radius: 9px;
+                    background: #1e293b;
+                    Text {
+                        property <int> i: tab-strip.hovered-tab-idx;
+                        text: i == 0 ? "1" : i == 1 ? "2" : i == 2 ? "3" : i == 3 ? "4" :
+                              i == 4 ? "5" : i == 5 ? "6" : i == 6 ? "7" : i == 7 ? "8" :
+                              i == 8 ? "9" : i == 9 ? "0" : i == 10 ? "q" : i == 11 ? "w" :
+                              i == 12 ? "e" : i == 13 ? "r" : i == 14 ? "t" : i == 15 ? "y" :
+                              i == 16 ? "u" : i == 17 ? "i" : i == 18 ? "o" : "p";
+                        color: #94a3b8;
+                        font-size: 10px;
+                        width: 100%;
+                        height: 100%;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+                Text {
+                    text: td.label;
+                    color: #cbd5e1;
+                    font-size: 12px;
+                    horizontal-stretch: 1;
+                }
+            }
+
+            // Codec pill · dims · filesize (only when data is available)
+            if has-meta : HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                if td.video-codec != "" : Rectangle {
+                    height: 16px;
+                    width: vc-lbl.preferred-width + 10px;
+                    border-radius: 3px;
+                    background: #1e3a8a;
+                    vc-lbl := Text {
+                        text: td.video-codec;
+                        color: #93c5fd;
+                        font-size: 10px;
+                        x: 5px;
+                        height: 100%;
+                        vertical-alignment: center;
+                    }
+                }
+                if td.info != "" : Text {
+                    text: td.info;
+                    color: #64748b;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
+                if td.filesize != "" : Text {
+                    text: td.filesize;
+                    color: #64748b;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+
+    // ---- Command toaster — floats bottom-right over the video, above the
+    //      transport bar. Pops in, holds, then fades out (~2s total). Declared
+    //      last so it composites on top; no TouchArea, so it never eats input.
+    toast-timer := Timer {
+        interval: 1700ms;
+        running: false;
+        triggered => {
+            root.toast-visible = false;
+            self.running = false;
+        }
+    }
+    Rectangle {
+        property <length> margin: 24px;
+        width: toast-label.preferred-width + 32px;
+        height: 38px;
+        x: root.width - self.width - self.margin;
+        // Sit just above the 84px transport band, in the video area's corner.
+        y: root.height - 84px - self.height - self.margin;
+        background: #1e293bf0;
+        border-radius: 10px;
+        border-width: 1px;
+        border-color: #334155;
+        drop-shadow-blur: 18px;
+        drop-shadow-color: #000000aa;
+        drop-shadow-offset-y: 4px;
+        opacity: root.toast-visible ? 1.0 : 0.0;
+        // Snappy pop-in, gentle fade-out.
+        animate opacity { duration: root.toast-visible ? 120ms : 450ms; easing: ease-in-out; }
+        toast-label := Text {
+            text: root.toast-text;
+            color: #e2e8f0;
+            font-size: 13px;
+            x: 16px;
+            height: 100%;
+            vertical-alignment: center;
+        }
+    }
+}
